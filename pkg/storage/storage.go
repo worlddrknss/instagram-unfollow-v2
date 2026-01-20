@@ -165,6 +165,18 @@ func ActionsInLastHour(db *sql.DB, actionType string) (int, error) {
 	return count, err
 }
 
+// OldestActionInLastHour returns the timestamp of the oldest action in the past hour
+// Returns 0 if no actions found
+func OldestActionInLastHour(db *sql.DB, actionType string) (int64, error) {
+	oneHourAgo := "strftime('%s', 'now') - 3600"
+	var oldest int64
+	err := db.QueryRow(
+		fmt.Sprintf("SELECT COALESCE(MIN(action_at), 0) FROM session_actions WHERE action_type = ? AND action_at > (%s)", oneHourAgo),
+		actionType,
+	).Scan(&oldest)
+	return oldest, err
+}
+
 // MarkNotFollowing records that we're not actually following a user
 func MarkNotFollowing(db *sql.DB, username string) error {
 	_, err := db.Exec(
