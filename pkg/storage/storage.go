@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Relationship represents a follower/following entry from the export.
@@ -16,7 +16,7 @@ type Relationship struct {
 
 // Open opens (or creates) the SQLite database and ensures schema is present.
 func Open(dbPath string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
