@@ -1,0 +1,25 @@
+instagram:
+  automation_limits:
+    actions:
+      hourly: 50
+      daily: 10000
+      time_window_seconds: 3600
+    operations:
+      follow:
+        max_per_hour: 50
+        max_per_day: 10000
+      unfollow:
+        max_per_hour: 50
+        max_per_day: 10000
+
+app:
+  version: "2.0.0"
+  extracted_path: "/tmp"
+  unfollow_delay_seconds: 60
+  max_retries: 5
+  backoff_multiplier: 2
+  safety_buffer_percent: 80
+  session:
+    max_actions_per_session: 20
+    session_restart_delay_minutes: 30
+    randomize_headers: false
