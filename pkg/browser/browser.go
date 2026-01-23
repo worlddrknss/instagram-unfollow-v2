@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"os"
 	"time"
 
@@ -28,12 +29,57 @@ type Browser struct {
 	config Config
 }
 
+// generateUserAgent creates a realistic, randomized user agent string
+func generateUserAgent() string {
+	// Chrome versions (recent stable releases)
+	chromeVersions := []string{"120.0.0.0", "121.0.0.0", "122.0.0.0", "123.0.0.0", "124.0.0.0", "125.0.0.0"}
+
+	// OS configurations
+	osConfigs := []struct {
+		platform string
+		versions []string
+	}{
+		{
+			platform: "Macintosh; Intel Mac OS X",
+			versions: []string{"10_15_7", "11_0_0", "12_0_0", "13_0_0", "14_0_0"},
+		},
+		{
+			platform: "Windows NT",
+			versions: []string{"10.0", "11.0"},
+		},
+		{
+			platform: "X11; Linux",
+			versions: []string{"x86_64"},
+		},
+	}
+
+	// Select random components
+	chromeVersion := chromeVersions[rand.Intn(len(chromeVersions))]
+	osConfig := osConfigs[rand.Intn(len(osConfigs))]
+	osVersion := osConfig.versions[rand.Intn(len(osConfig.versions))]
+
+	// Build the user agent string
+	var osPart string
+	switch osConfig.platform {
+	case "Macintosh; Intel Mac OS X":
+		osPart = fmt.Sprintf("%s %s", osConfig.platform, osVersion)
+	case "Windows NT":
+		osPart = fmt.Sprintf("%s %s; Win64; x64", osConfig.platform, osVersion)
+	case "X11; Linux":
+		osPart = fmt.Sprintf("%s %s", osConfig.platform, osVersion)
+	}
+
+	return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", osPart, chromeVersion)
+}
+
 // New creates a new Browser instance with optional persistent session
 func New(logger *slog.Logger, cfg Config) (*Browser, error) {
+	userAgent := generateUserAgent()
+
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-infobars", true),
-		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		chromedp.UserAgent(userAgent),
 	)
 
 	if cfg.Headless {
@@ -48,6 +94,8 @@ func New(logger *slog.Logger, cfg Config) (*Browser, error) {
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(logger.Info))
+
+	logger.Info("Browser agent information", "user_agent", userAgent)
 
 	return &Browser{
 		ctx:    ctx,
