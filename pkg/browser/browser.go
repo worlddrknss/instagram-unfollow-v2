@@ -139,10 +139,8 @@ func New(logger *slog.Logger, cfg Config) (*Browser, error) {
 	// Comprehensive anti-detection flags
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		// Core anti-detection
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-infobars", true),
 		chromedp.Flag("enable-automation", false),
-		chromedp.Flag("disable-automation", true),
 		chromedp.UserAgent(userAgent),
 
 		// Disable features that reveal automation
