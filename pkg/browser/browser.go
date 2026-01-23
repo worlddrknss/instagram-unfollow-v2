@@ -9,7 +9,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -28,6 +30,64 @@ type Browser struct {
 	logger *slog.Logger
 	config Config
 }
+
+// stealthScript contains JavaScript to override automation detection
+const stealthScript = `
+// Override webdriver property
+Object.defineProperty(navigator, 'webdriver', {
+	get: () => undefined,
+});
+
+// Override plugins to appear as regular browser
+Object.defineProperty(navigator, 'plugins', {
+	get: () => [1, 2, 3, 4, 5],
+});
+
+// Override languages
+Object.defineProperty(navigator, 'languages', {
+	get: () => ['en-US', 'en'],
+});
+
+// Override permissions API
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+	parameters.name === 'notifications' ?
+		Promise.resolve({ state: Notification.permission }) :
+		originalQuery(parameters)
+);
+
+// Override chrome runtime
+window.chrome = {
+	runtime: {},
+};
+
+// Override connection rtt (automation often has rtt of 0)
+Object.defineProperty(navigator, 'connection', {
+	get: () => ({
+		effectiveType: '4g',
+		rtt: 50,
+		downlink: 10,
+		saveData: false,
+	}),
+});
+
+// Override hardware concurrency
+Object.defineProperty(navigator, 'hardwareConcurrency', {
+	get: () => 8,
+});
+
+// Override device memory
+Object.defineProperty(navigator, 'deviceMemory', {
+	get: () => 8,
+});
+
+// Prevent iframe detection
+Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+	get: function() {
+		return window;
+	}
+});
+`
 
 // generateUserAgent creates a realistic, randomized user agent string
 func generateUserAgent() string {
@@ -76,14 +136,41 @@ func generateUserAgent() string {
 func New(logger *slog.Logger, cfg Config) (*Browser, error) {
 	userAgent := generateUserAgent()
 
+	// Comprehensive anti-detection flags
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		// Core anti-detection
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-infobars", true),
+		chromedp.Flag("enable-automation", false),
+		chromedp.Flag("disable-automation", true),
 		chromedp.UserAgent(userAgent),
+
+		// Disable features that reveal automation
+		chromedp.Flag("disable-extensions", false),
+		chromedp.Flag("disable-default-apps", false),
+		chromedp.Flag("disable-component-extensions-with-background-pages", false),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("no-default-browser-check", true),
+
+		// GPU and rendering (avoid fingerprinting differences)
+		chromedp.Flag("disable-gpu", false),
+		chromedp.Flag("enable-webgl", true),
+		chromedp.Flag("enable-3d-apis", true),
+
+		// Window size to appear normal
+		chromedp.WindowSize(1920, 1080),
+
+		// Exclude switches that reveal automation
+		chromedp.ExecPath(""), // Will use default, but we set it to trigger proper detection
 	)
 
+	// Remove the ExecPath override we just set (it was a no-op)
+	opts = opts[:len(opts)-1]
+
 	if cfg.Headless {
-		opts = append(opts, chromedp.Headless)
+		// Use new headless mode which is harder to detect
+		opts = append(opts, chromedp.Flag("headless", "new"))
 	} else {
 		opts = append(opts, chromedp.Flag("headless", false))
 	}
@@ -97,12 +184,55 @@ func New(logger *slog.Logger, cfg Config) (*Browser, error) {
 
 	logger.Info("Browser agent information", "user_agent", userAgent)
 
+	// Initialize browser and inject stealth script
+	if err := chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Enable page events to inject script on every page load
+			if err := page.Enable().Do(ctx); err != nil {
+				return err
+			}
+			// Add script to run before any other scripts on every page
+			_, err := page.AddScriptToEvaluateOnNewDocument(stealthScript).Do(ctx)
+			return err
+		}),
+	); err != nil {
+		cancel()
+		allocCancel()
+		return nil, fmt.Errorf("failed to initialize stealth mode: %w", err)
+	}
+
 	return &Browser{
 		ctx:    ctx,
 		cancel: func() { cancel(); allocCancel() },
 		logger: logger,
 		config: cfg,
 	}, nil
+}
+
+// randomDelay adds a human-like random delay between actions
+func (b *Browser) randomDelay(minMs, maxMs int) {
+	delay := time.Duration(minMs+rand.Intn(maxMs-minMs)) * time.Millisecond
+	time.Sleep(delay)
+}
+
+// humanClick simulates a more human-like click with slight randomness
+func (b *Browser) humanClick(sel string, opts ...chromedp.QueryOption) chromedp.ActionFunc {
+	return func(ctx context.Context) error {
+		// Small random delay before clicking
+		time.Sleep(time.Duration(100+rand.Intn(200)) * time.Millisecond)
+
+		// Get node info for the element
+		var nodes []*cdp.Node
+		if err := chromedp.Nodes(sel, &nodes, opts...).Do(ctx); err != nil {
+			return err
+		}
+		if len(nodes) == 0 {
+			return fmt.Errorf("no node found for selector: %s", sel)
+		}
+
+		// Click the element
+		return chromedp.Click(sel, opts...).Do(ctx)
+	}
 }
 
 // Close shuts down the browser
