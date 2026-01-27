@@ -59,24 +59,26 @@ type application struct {
 	logger *slog.Logger
 }
 
-func getFlags() (string, string, bool) {
+func getFlags() (string, string, bool, bool) {
 	var configPath string
 	var dataPath string
 	var runUnfollow bool
+	var listCandidates bool
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to configuration file")
 	flag.StringVar(&dataPath, "data", "", "Path to Instagram export zip file")
 	flag.BoolVar(&runUnfollow, "unfollow", false, "Run the unfollow process")
+	flag.BoolVar(&listCandidates, "list", false, "List remaining users to unfollow")
 	flag.Parse()
 
 	if configPath != "" {
-		return configPath, dataPath, runUnfollow
+		return configPath, dataPath, runUnfollow, listCandidates
 	}
 
 	if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
-		return envPath, dataPath, runUnfollow
+		return envPath, dataPath, runUnfollow, listCandidates
 	}
 
-	return "config.yaml", dataPath, runUnfollow
+	return "config.yaml", dataPath, runUnfollow, listCandidates
 }
 
 func loadConfig(path string) (*config, error) {
@@ -96,7 +98,7 @@ func loadConfig(path string) (*config, error) {
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	configPath, dataPath, doUnfollow := getFlags()
+	configPath, dataPath, doUnfollow, doList := getFlags()
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		logger.Error("Failed to load config", slog.String("path", configPath), slog.Any("error", err))
@@ -120,6 +122,13 @@ func main() {
 
 		if err := app.parseToDB(dest); err != nil {
 			app.logger.Error("Failed to parse and import data", slog.Any("error", err))
+			os.Exit(1)
+		}
+	}
+
+	if doList {
+		if err := app.listCandidates(); err != nil {
+			app.logger.Error("Failed to list candidates", slog.Any("error", err))
 			os.Exit(1)
 		}
 	}
